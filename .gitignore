@@ -5,6 +5,10 @@ mailman.cfg
 *.egg-info
 test
 var
+settings.py
+pip.txt
+web
+
 # Created by https://www.toptal.com/developers/gitignore/api/pycharm,pip,python
 # Edit at https://www.toptal.com/developers/gitignore?templates=pycharm,pip,python
 
