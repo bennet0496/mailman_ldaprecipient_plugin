@@ -5,6 +5,10 @@ from functools import lru_cache
 import ldap3
 from mailman.config import config as mmconfig
 from mailman.interfaces.mailinglist import IMailingList
+from mailman.rest.helpers import CollectionMixin, bad_request, okay, etag
+from mailman.rest.validator import Validator
+from zope.component import getUtility
+
 
 @lru_cache
 def get_config():
@@ -48,7 +52,7 @@ def get_ldap_connection(config = None) -> ldap3.Connection:
     conn.bind()
     return conn
 
-def _find_users_mail_by_uid(uids: list, config = None) -> list:
+def _find_users_by_uid(uids: list, config = None) -> list:
     if config is None:
         config = get_config()
 
@@ -58,33 +62,38 @@ def _find_users_mail_by_uid(uids: list, config = None) -> list:
     ufilter = "(|(uid={}))".format(ufilter)
 
     conn.search(config['ldap_user_base'], ufilter,
-                attributes=[config['ldap_user_mail_attribute'], "cn", "uid"],
+                attributes=ldap3.ALL_ATTRIBUTES,
                 get_operational_attributes=False)
 
+    return [e.entry_attributes_as_dict for e in conn.entries]
+
+def _find_users_mail_by_uid(uids: list, config = None) -> list:
     mails = []
-    for entry in conn.entries:
-        mails.extend(entry.mail.values)
+    for entry in _find_users_by_uid(uids, config):
+        mails.extend(entry['mail'])
 
     return mails
 
-
-def _find_users_mail_by_memberof(group_dn: str, config=None) -> list:
+def _find_users_by_memberof(group_dn: str, config=None) -> list:
     if config is None:
         config = get_config()
 
     conn = get_ldap_connection()
 
     conn.search(config['ldap_user_base'], '(memberOf={})'.format(group_dn),
-                attributes=[config['ldap_user_mail_attribute'], "cn", "uid"],
+                attributes=ldap3.ALL_ATTRIBUTES,
                 get_operational_attributes=False)
 
+    return [e.entry_attributes_as_dict for e in conn.entries]
+
+def _find_users_mail_by_memberof(group_dn: str, config=None) -> list:
     mails = []
-    for entry in conn.entries:
-        mails.extend(entry.mail.values)
+    for entry in _find_users_by_memberof(group_dn, config):
+        mails.extend(entry['mail'])
 
     return mails
 
-def find_list_group(mlist: IMailingList, populate_member_emails = True, config = None) -> dict[str, list]|None:
+def find_list_group(mlist: IMailingList, populate_member_emails = True, populate_members = False, config = None) -> dict[str, list]|None:
     if config is None:
         config = get_config()
 
@@ -98,15 +107,47 @@ def find_list_group(mlist: IMailingList, populate_member_emails = True, config =
 
     list_groups = {
         'lists': [json.loads(entry.entry_to_json()) for entry in conn.entries],
-        'member_emails': []
+        'member_emails': [],
+        'members': []
     }
-    if populate_member_emails:
+
+    if populate_member_emails or populate_members:
         for entry in conn.entries:
             if "memberUid" in entry.entry_attributes or "posixGroup" in entry.objectClass.values:
                 # Posix Group
-                list_groups['member_emails'].extend(_find_users_mail_by_uid(entry.memberUid.values, config))
+                if populate_member_emails:
+                    list_groups['member_emails'].extend(_find_users_mail_by_uid(entry.memberUid.values, config))
+                if populate_members:
+                    list_groups['members'].extend(_find_users_by_uid(entry.memberUid.values, config))
             elif "member" in entry.entry_attributes or "groupOfNames" in entry.objectClass.values:
                 # Group Of names
-                list_groups['member_emails'].extend(_find_users_mail_by_memberof(entry.entry_dn, config))
+                if populate_member_emails:
+                    list_groups['member_emails'].extend(_find_users_mail_by_memberof(entry.entry_dn, config))
+                if populate_members:
+                    list_groups['members'].extend(_find_users_by_memberof(entry.entry_dn, config))
 
     return list_groups
+
+
+class _LdapMemberBase(CollectionMixin):
+    """Shared base class for member representations."""
+
+    def _resource_as_dict(self, member, fields=None):
+        return member
+
+    def _get_collection(self, request):
+        """See `CollectionMixin`."""
+        raise NotImplementedError
+
+
+class LdapMemberCollection(_LdapMemberBase):
+    """Abstract class for supporting submemberships.
+
+        This is used for example to return a resource representing all the
+        memberships of a mailing list, or all memberships for a specific email
+        address.
+        """
+
+    def _get_collection(self, request):
+        """See `CollectionMixin`."""
+        raise NotImplementedError
