@@ -1,18 +1,13 @@
-from contextlib import suppress
-
 import ldap3
 from mailman.config import config
 from mailman.core.i18n import _
 from mailman.interfaces.action import Action
-from mailman.interfaces.address import InvalidEmailAddressError
 from mailman.interfaces.bans import IBanManager
-from mailman.interfaces.member import MemberRole
 from mailman.interfaces.rules import IRule
-from mailman.interfaces.usermanager import IUserManager
 from public import public
-from zope.component import getUtility
 from zope.interface import implementer
-from mailman.rules.moderation import MemberModeration, NonmemberModeration
+
+from mailman_ldaprecipient_plugin.ldap import find_list_group
 
 
 @public
@@ -29,15 +24,11 @@ class LdapMemberModeration:
 
     def check(self, mlist, msg, msgdata):
         """See `IRule`."""
-        tls = None
-        if self._plugin.ldap_tls_cert is not None:
-            tls = ldap3.Tls(ca_certs_file=self._plugin.ldap_tls_cert)
-        srv = ldap3.Server(self._plugin.ldap_uri, int(self._plugin.ldap_port or 389), tls=tls)
-        conn = ldap3.Connection(srv, user=self._plugin.ldap_bind_dn, password=self._plugin.ldap_bind_pass)
-        if self._plugin.ldap_tls_cert is not None:
-            conn.start_tls()
 
-        conn.bind()
+        ldap_list = find_list_group(mlist)
+        if ldap_list is None:
+            # Not an LDAP based list. Let Original Function handle it
+            return self._plugin.original_member_moderation_rule.check(mlist, msg, msgdata)
 
         # The MemberModeration rule misses unconditionally if any of the
         # senders are banned.
@@ -47,13 +38,17 @@ class LdapMemberModeration:
                 return False
 
         for sender in msg.senders:
-            conn.search(self._plugin.ldap_user_base, "(mail={})".format(sender), attributes=["uid", "mail", "cn"])
-            if len(conn.entries) > 0:
+            if sender in ldap_list['member_emails']:
+                # A sender is Group member
                 break
         else:
+            # No sender is a member, drop to Original function, maybe they are a direct memeber
             return self._plugin.original_member_moderation_rule.check(mlist, msg, msgdata)
 
+        # Use default member action, as LDAP doesn't hold Action Information
         action = mlist.default_member_action
+
+        # Taken from original function
         if action is Action.defer:
             # The regular moderation rules apply.
             return False
@@ -63,7 +58,9 @@ class LdapMemberModeration:
             msgdata['member_moderation_action'] = action.name
             msgdata['moderation_sender'] = sender
             return True
+
         # The sender is not a member so this rule does not match.
+        # We should not come to here but drop to original function just in case
         return self._plugin.original_member_moderation_rule.check(mlist, msg, msgdata)
 
 @public
@@ -81,15 +78,10 @@ class LdapNonMemberModeration:
     def check(self, mlist, msg, msgdata):
         """See `IRule`."""
 
-        tls = None
-        if self._plugin.ldap_tls_cert is not None:
-            tls = ldap3.Tls(ca_certs_file=self._plugin.ldap_tls_cert)
-        srv = ldap3.Server(self._plugin.ldap_uri, int(self._plugin.ldap_port or 389), tls=tls)
-        conn = ldap3.Connection(srv, user=self._plugin.ldap_bind_dn, password=self._plugin.ldap_bind_pass)
-        if self._plugin.ldap_tls_cert is not None:
-            conn.start_tls()
-
-        conn.bind()
+        ldap_list = find_list_group(mlist)
+        if ldap_list is None:
+            # Not an LDAP based list. Let Original Function handle it
+            return self._plugin.original_nonmember_moderation_rule.check(mlist, msg, msgdata)
 
         ban_manager = IBanManager(mlist)
 
@@ -97,12 +89,19 @@ class LdapNonMemberModeration:
             if ban_manager.is_banned(sender):
                 return False
         if len(msg.senders) == 0:
+            # there are no sender? let the original nonmember-hook do it's magic
             return self._plugin.original_nonmember_moderation_rule.check(mlist, msg, msgdata)
+
         # Every sender email must be a member or nonmember directly.  If it is
         # neither, make the email a nonmembers.
+        isnonmember = []
         for sender in msg.senders:
-            conn.search(self._plugin.ldap_user_base, "(mail={})".format(sender), attributes=["uid", "mail", "cn"])
-            if len(conn.entries) == 0:
-                return self._plugin.original_nonmember_moderation_rule.check(mlist, msg, msgdata)
+            isnonmember.append(sender not in ldap_list['member_emails'])
 
+        if min(isnonmember): # There are only non-members
+            # Senders are non-member from LDAP view, however they still might be a direct member
+            # let the original nonmember-hook handle that
+            return self._plugin.original_nonmember_moderation_rule.check(mlist, msg, msgdata)
+
+        # Sender is a member, i.e. this rule doesn't match
         return False
