@@ -16,8 +16,8 @@ jobs:
         cache: 'pip'
     - name: Set up Python Environment
       run: |
-        apt update -y
-        apt install -y apt-file dpkg-dev fakeroot build-essential devscripts debhelper
+        sudo apt update -y
+        sudo apt install -y apt-file dpkg-dev fakeroot build-essential devscripts debhelper
         pip install wheel2deb build setuptools setuptools_scm
     - name: Build
       run: |
