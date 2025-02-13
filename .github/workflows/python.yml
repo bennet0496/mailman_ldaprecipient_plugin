@@ -1,0 +1,29 @@
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+        cache: 'pip'
+    - name: Set up Python Environment
+      run: |
+        apt update -y
+        apt install -y apt-file dpkg-dev fakeroot build-essential devscripts debhelper
+        pip install wheel2deb build setuptools setuptools_scm
+    - name: Build
+      run: |
+        python3 -m build --wheel
+        cd dist
+        wheel2deb -o .
+    - uses: ncipollo/release-action@v1
+      with:
+        artifacts: "dist/*,output/*"

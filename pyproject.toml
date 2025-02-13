@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools >= 61.0"]
+requires = ["setuptools>=64", "setuptools_scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -37,3 +37,5 @@ classifiers = [
 [project.urls]
 Repository = "https://github.com/bennet0496/mailman_ldaprecipient_plugin"
 "Bug Tracker" = "https://github.com/bennet0496/mailman_ldaprecipient_plugin/issues"
+
+[tool.setuptools_scm]
