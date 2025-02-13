@@ -22,7 +22,7 @@ And in `/etc/mailman/ldap.cfg`
 ```ini
 [ldap]
 ldap_uri: ldap://ldap.example.com
-ldap_port: 386
+ldap_port: 389
 ; only read permissions are required for membership and name attributes
 ; so don't actually use a root user
 ldap_bind_dn: cn=root,dc=example,dc=com

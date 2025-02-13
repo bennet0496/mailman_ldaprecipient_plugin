@@ -26,4 +26,4 @@ jobs:
         wheel2deb -o .
     - uses: ncipollo/release-action@v1
       with:
-        artifacts: "dist/*,output/*"
+        artifacts: "dist/*"
