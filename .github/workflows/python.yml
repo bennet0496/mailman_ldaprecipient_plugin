@@ -24,6 +24,6 @@ jobs:
         python3 -m build --wheel
         cd dist
         wheel2deb -o .
-    - uses: ncipollo/release-action@v1
+    - uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1.21.0
       with:
         artifacts: "dist/*"
